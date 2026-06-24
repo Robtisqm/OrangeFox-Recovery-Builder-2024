@@ -90,7 +90,7 @@ jobs:
         git config --global user.email "build@orangefox.com"
         git clone https://gitlab.com/OrangeFox/sync.git
         cd sync
-        ./orangefox_sync.sh --branch ${{ github.event.inputs.MANIFEST_BRANCH }} --path ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
+        ./orangefox_sync.sh --branch ${{ github.event.inputs.MANIFEST_BRANCH }} --path ${GITHUB_WORKSPACE}/OrangeFox/fox_${__{{ github.event.inputs.MANIFEST_BRANCH }}
 
     - name: Clone Device Tree
       run: |
@@ -111,14 +111,29 @@ jobs:
     - name: Building OrangeFox
       run: |
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
+        
+        # Ограничиваем аппетиты тяжелого компилятора Android 12, чтобы не падать по OOM
+        export SOONG_LINK_THREADS=1
+        export NINJA_ARGS="-j2"
+        export ALLOW_MISSING_DEPENDENCIES=true
+        
         set +e
         source build/envsetup.sh
-        export ALLOW_MISSING_DEPENDENCIES=true
         set -e
         
-        # Сначала пробуем стандартный twrp, в случае неудачи - прыгаем на сгенерированный omni
-        lunch twrp_${{ github.event.inputs.DEVICE_NAME }}-eng && make clean && mka adbd ${{ github.event.inputs.BUILD_TARGET }}image || \
-        lunch omni_${{ github.event.inputs.DEVICE_NAME }}-eng && make clean && mka ${{ github.event.inputs.BUILD_TARGET }}image
+        # Переписано на надежный if-else вместо хрупких цепочек && и ||
+        if lunch twrp_${{ github.event.inputs.DEVICE_NAME }}-eng; then
+            echo "Успешный lunch для TWRP дерева. Начинаем сборку..."
+            make clean
+            make -j2 adbd ${{ github.event.inputs.BUILD_TARGET }}image
+        elif lunch omni_${{ github.event.inputs.DEVICE_NAME }}-eng; then
+            echo "TWRP lunch не удался, переключаемся на Omni обертку..."
+            make clean
+            make -j2 ${{ github.event.inputs.BUILD_TARGET }}image
+        else
+            echo "Ошибка: Не удалось применить ни один из профилей сборки (lunch)!"
+            exit 1
+        fi
 
     - name: Set Build Date
       run: |
@@ -136,18 +151,19 @@ jobs:
             echo "CHECK_IMG_IS_OK=true" >> $GITHUB_ENV
             echo "FILE_PATH=${GITHUB_WORKSPACE}/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}/out/target/product/${{ github.event.inputs.DEVICE_NAME }}" >> $GITHUB_ENV
         else
-            echo "Recovery not found!"
+            echo "Ошибка: Готовый образ рекавери не найден в директории out/!"
             exit 1
         fi
 
     - name: Rename the Recovery
+      if: ${{ env.CHECK_IMG_IS_OK == 'true' }}
       run: |
         cd ${{ env.FILE_PATH }}/
         mv OrangeFox*.img recovery.img || true
         echo "RECOVERY_TYPE=recovery" >> $GITHUB_ENV
 
     - name: Recovery to tar for Samsung
-      if: ${{ github.event.inputs.RECOVERY_TAR == 'true' || github.event.inputs.RECOVERY_TAR == true }}
+      if: ${{ env.CHECK_IMG_IS_OK == 'true' && (github.event.inputs.RECOVERY_TAR == 'true' || github.event.inputs.RECOVERY_TAR == true) }}
       run: |
         cd ${{ env.FILE_PATH }}/
         tar -cvf recovery.tar recovery.img
@@ -157,8 +173,8 @@ jobs:
       uses: softprops/action-gh-release@v1
       with:
         files: |
-          ${{ env.FILE_PATH }}/recovery.img
-          ${{ env.FILE_PATH }}/recovery.tar
+          ${/ env.FILE_PATH }/recovery.img
+          ${/ env.FILE_PATH }/recovery.tar
         name: Unofficial OrangeFox for p4noterf // ${{ env.BUILD_DATE }}
         tag_name: ${{ github.run_id }}
         body: |

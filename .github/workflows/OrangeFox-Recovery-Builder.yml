@@ -90,7 +90,7 @@ jobs:
         git config --global user.email "build@orangefox.com"
         git clone https://gitlab.com/OrangeFox/sync.git
         cd sync
-        ./orangefox_sync.sh --branch ${{ github.event.inputs.MANIFEST_BRANCH }} --path ${GITHUB_WORKSPACE}/OrangeFox/fox_${__{{ github.event.inputs.MANIFEST_BRANCH }}
+        ./orangefox_sync.sh --branch ${{ github.event.inputs.MANIFEST_BRANCH }} --path ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
 
     - name: Clone Device Tree
       run: |
@@ -112,7 +112,7 @@ jobs:
       run: |
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
         
-        # Ограничиваем аппетиты тяжелого компилятора Android 12, чтобы не падать по OOM
+        # Защита от OOM Killer (нехватка оперативной памяти)
         export SOONG_LINK_THREADS=1
         export NINJA_ARGS="-j2"
         export ALLOW_MISSING_DEPENDENCIES=true
@@ -121,7 +121,7 @@ jobs:
         source build/envsetup.sh
         set -e
         
-        # Переписано на надежный if-else вместо хрупких цепочек && и ||
+        # Безопасная проверка профилей через полноценный if-else
         if lunch twrp_${{ github.event.inputs.DEVICE_NAME }}-eng; then
             echo "Успешный lunch для TWRP дерева. Начинаем сборку..."
             make clean
@@ -146,26 +146,27 @@ jobs:
 
     - name: Check if Recovery Exist
       run: |
-        cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
-        if [ -f out/target/product/${{ github.event.inputs.DEVICE_NAME }}/OrangeFox*.img ]; then
+        cd "$GITHUB_WORKSPACE/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}"
+        # ls корректно раскроет звёздочку в условиях GitHub Actions
+        if ls out/target/product/${{ github.event.inputs.DEVICE_NAME }}/OrangeFox*.img >/dev/null 2>&1; then
             echo "CHECK_IMG_IS_OK=true" >> $GITHUB_ENV
-            echo "FILE_PATH=${GITHUB_WORKSPACE}/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}/out/target/product/${{ github.event.inputs.DEVICE_NAME }}" >> $GITHUB_ENV
+            echo "FILE_PATH=$GITHUB_WORKSPACE/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}/out/target/product/${{ github.event.inputs.DEVICE_NAME }}" >> $GITHUB_ENV
         else
-            echo "Ошибка: Готовый образ рекавери не найден в директории out/!"
+            echo "Ошибка: Готовый образ рекавери не найден в директории out!"
             exit 1
         fi
 
     - name: Rename the Recovery
       if: ${{ env.CHECK_IMG_IS_OK == 'true' }}
       run: |
-        cd ${{ env.FILE_PATH }}/
+        cd "$FILE_PATH"
         mv OrangeFox*.img recovery.img || true
         echo "RECOVERY_TYPE=recovery" >> $GITHUB_ENV
 
     - name: Recovery to tar for Samsung
       if: ${{ env.CHECK_IMG_IS_OK == 'true' && (github.event.inputs.RECOVERY_TAR == 'true' || github.event.inputs.RECOVERY_TAR == true) }}
       run: |
-        cd ${{ env.FILE_PATH }}/
+        cd "$FILE_PATH"
         tar -cvf recovery.tar recovery.img
 
     - name: Upload to Release
@@ -173,8 +174,8 @@ jobs:
       uses: softprops/action-gh-release@v1
       with:
         files: |
-          ${/ env.FILE_PATH }/recovery.img
-          ${/ env.FILE_PATH }/recovery.tar
+          ${{ env.FILE_PATH }}/recovery.img
+          ${{ env.FILE_PATH }}/recovery.tar
         name: Unofficial OrangeFox for p4noterf // ${{ env.BUILD_DATE }}
         tag_name: ${{ github.run_id }}
         body: |

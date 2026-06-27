@@ -97,43 +97,43 @@ jobs:
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
         git clone ${{ github.event.inputs.DEVICE_TREE }} -b ${{ github.event.inputs.DEVICE_TREE_BRANCH }} ./${{ github.event.inputs.DEVICE_PATH }}
         cd ./${{ github.event.inputs.DEVICE_PATH }}
-        
         echo "COMMIT_ID=$(git rev-parse HEAD)" >> $GITHUB_ENV
-
-        # === Создание чистой Omni-обертки ===
-        echo "Генерируем виртуальный omni-конфиг для совместимости..."
-        if [ -f twrp_p4noterf.mk ]; then
-          echo '# Omni wrapper for TWRP tree' > omni_p4noterf.mk
-          echo '$(call inherit-product, device/samsung/p4noterf/twrp_p4noterf.mk)' >> omni_p4noterf.mk
-          echo 'PRODUCT_NAME := omni_p4noterf' >> omni_p4noterf.mk
-        fi
 
     - name: Building OrangeFox
       run: |
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
         
-        # Патч линкера для 32-битного процессора Exynos (p4noterf)
-        echo "Применяем патч libbinder для обхода проверки 64-битных символов..."
-        sed -i '/ldflags: \[/a \ \ \ \ \ \ \ \ "-Wl,--undefined-version",' frameworks/native/libs/binder/Android.bp
+        # === ВЕНДОР-ПАТЧ: Радикальное исправление libbinder для 32-битного процессора Exynos 4412 ===
+        echo "Запуск глубокого патча libbinder..."
+        if [ -d frameworks/native/libs/binder ]; then
+          # Очищаем старую карту версий и принудительно открываем все символы наружу (global: *;)
+          echo "LIBBINDER { global: *; };" > frameworks/native/libs/binder/libbinder.map
+          # Вырезаем строку version_script из сборочного файла Android.bp, чтобы отключить проверку версий символов
+          sed -i '/version_script: "libbinder.map",/d' frameworks/native/libs/binder/Android.bp
+          echo "Патч libbinder успешно применен!"
+        else
+          echo "Предупреждение: Директория frameworks/native/libs/binder не найдена!"
+        fi
         
-        # Защита от OOM Killer (нехватка оперативной памяти)
+        # Защита от OOM Killer (нехватка оперативной памяти на серверах GitHub)
         export SOONG_LINK_THREADS=1
         export NINJA_ARGS="-j2"
         export ALLOW_MISSING_DEPENDENCIES=true
+        export BUILD_BROKEN_MISSING_OUTPUTS=true
         
         set +e
         source build/envsetup.sh
         set -e
         
-        # Безопасная проверка профилей через полноценный if-else
-        if lunch twrp_${{ github.event.inputs.DEVICE_NAME }}-eng; then
-            echo "Успешный lunch для TWRP дерева. Начинаем сборку..."
-            make clean
-            make -j2 adbd ${{ github.event.inputs.BUILD_TARGET }}image
-        elif lunch omni_${{ github.event.inputs.DEVICE_NAME }}-eng; then
-            echo "TWRP lunch не удался, переключаемся на Omni обертку..."
+        # Поочередно проверяем профили сборки lunch
+        if lunch omni_${{ github.event.inputs.DEVICE_NAME }}-eng; then
+            echo "Успешный lunch для профиля OMNI. Начинаем компиляцию..."
             make clean
             make -j2 ${{ github.event.inputs.BUILD_TARGET }}image
+        elif lunch twrp_${{ github.event.inputs.DEVICE_NAME }}-eng; then
+            echo "Профиль OMNI не найден, переключаемся на TWRP lunch..."
+            make clean
+            make -j2 adbd ${{ github.event.inputs.BUILD_TARGET }}image
         else
             echo "Ошибка: Не удалось применить ни один из профилей сборки (lunch)!"
             exit 1
@@ -154,6 +154,9 @@ jobs:
         if ls out/target/product/${{ github.event.inputs.DEVICE_NAME }}/OrangeFox*.img >/dev/null 2>&1; then
             echo "CHECK_IMG_IS_OK=true" >> $GITHUB_ENV
             echo "FILE_PATH=$GITHUB_WORKSPACE/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}/out/target/product/${{ github.event.inputs.DEVICE_NAME }}" >> $GITHUB_ENV
+        elif ls out/target/product/${{ github.event.inputs.DEVICE_NAME }}/recovery.img >/dev/null 2>&1; then
+            echo "CHECK_IMG_IS_OK=true" >> $GITHUB_ENV
+            echo "FILE_PATH=$GITHUB_WORKSPACE/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}/out/target/product/${{ github.event.inputs.DEVICE_NAME }}" >> $GITHUB_ENV
         else
             echo "Ошибка: Готовый образ рекавери не найден в директории out!"
             exit 1
@@ -163,7 +166,9 @@ jobs:
       if: ${{ env.CHECK_IMG_IS_OK == 'true' }}
       run: |
         cd "$FILE_PATH"
-        mv OrangeFox*.img recovery.img || true
+        if ls OrangeFox*.img >/dev/null 2>&1; then
+          mv OrangeFox*.img recovery.img
+        fi
         echo "RECOVERY_TYPE=recovery" >> $GITHUB_ENV
 
     - name: Recovery to tar for Samsung

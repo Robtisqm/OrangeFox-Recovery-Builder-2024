@@ -103,16 +103,28 @@ jobs:
       run: |
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
         
-        # === ВЕНДОР-ПАТЧ: Радикальное исправление libbinder для 32-битного процессора Exynos 4412 ===
-        echo "Запуск глубокого патча libbinder..."
-        if [ -d frameworks/native/libs/binder ]; then
-          # Очищаем старую карту версий и принудительно открываем все символы наружу (global: *;)
-          echo "LIBBINDER { global: *; };" > frameworks/native/libs/binder/libbinder.map
-          # Вырезаем строку version_script из сборочного файла Android.bp, чтобы отключить проверку версий символов
-          sed -i '/version_script: "libbinder.map",/d' frameworks/native/libs/binder/Android.bp
-          echo "Патч libbinder успешно применен!"
+        # === ВЕНДОР-ПАТЧ: Инъекция флага --undefined-version напрямую в Android.bp ===
+        echo "Запуск глубокого патча libbinder под Android 12..."
+        BP_PATH="frameworks/native/libs/binder/Android.bp"
+        if [ -f "$BP_PATH" ]; then
+          # 1. Сносим строчку с маппингом версий символов
+          sed -i '/version_script: "libbinder.map",/d' "$BP_PATH"
+          
+          # 2. Безопасный инжект флага в массив ldflags для cc_library_shared
+          awk '
+          /cc_library_shared \{/ { inside_shared=1 }
+          inside_shared && /ldflags: \[/ { 
+            print; 
+            print "        \"-Wl,--undefined-version\","; 
+            inside_shared=0; 
+            next 
+          }
+          { print }
+          ' "$BP_PATH" > "${BP_PATH}.tmp" && mv "${BP_PATH}.tmp" "$BP_PATH"
+          
+          echo "Патч Android.bp успешно применен!"
         else
-          echo "Предупреждение: Директория frameworks/native/libs/binder не найдена!"
+          echo "Предупреждение: Файл $BP_PATH не найден!"
         fi
         
         # Защита от OOM Killer (нехватка оперативной памяти на серверах GitHub)

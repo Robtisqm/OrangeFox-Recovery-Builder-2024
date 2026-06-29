@@ -110,36 +110,50 @@ jobs:
       run: |
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
         
-        # === LINKER HACK: Global override for the strict '--no-undefined-version' flag ===
-        # Android 12's Soong build system enforces symbol version matching via .map files.
-        # Since we are compiling a legacy 32-bit device tree, many required mangled symbols are missing,
-        # which causes ld.lld to throw fatal errors during libbinder compilation.
-        echo "Patching Soong and Make build configuration files..."
+        echo "=== ЗАПУСК ОВЕРРАЙД-ПАТЧЕЙ ДЛЯ EXYNOS 4412 ==="
         
-        # 1. Force replace '--no-undefined-version' with '--undefined-version' inside Soong (Go) and Make (.mk) core files
-        find build/soong/ -type f -name "*.go" -exec sed -i 's/"-Wl,--no-undefined-version"/"-Wl,--undefined-version"/g' {} +
-        find build/soong/ -type f -name "*.go" -exec sed -i 's/--no-undefined-version/--undefined-version/g' {} +
-        find build/make/core/ -type f -name "*.mk" -exec sed -i 's/-Wl,--no-undefined-version/-Wl,--undefined-version/g' {} +
-        
-        # 2. Force-delete the 'version_script' attribute lines in libbinder's Android.bp to bypass symbol tracking entirely
-        BP_PATH="frameworks/native/libs/binder/Android.bp"
-        if [ -f "$BP_PATH" ]; then
-          echo "Completely removing version_script entries from $BP_PATH to prevent ld.lld from tracking missing 32-bit symbols."
-          sed -i '/version_script:/d' "$BP_PATH"
+        # 1. Вырезаем устаревшие флаги TARGET_GLOBAL_LDFLAGS прямо из дерева устройств во время сборки
+        if [ -f "${{ github.event.inputs.DEVICE_PATH }}/BoardConfig.mk" ]; then
+          echo "Зачистка BoardConfig.mk от TARGET_GLOBAL_LDFLAGS..."
+          sed -i '/TARGET_GLOBAL_LDFLAGS/d' "${{ github.event.inputs.DEVICE_PATH }}/BoardConfig.mk"
         fi
+
+        # 2. Очищаем устаревшие вызовы в файлеvendorsetup.sh
+        if [ -f "${{ github.event.inputs.DEVICE_PATH }}/vendorsetup.sh" ]; then
+          echo "Зачистка vendorsetup.sh..."
+          sed -i '/TARGET_GLOBAL_LDFLAGS/d' "${{ github.event.inputs.DEVICE_PATH }}/vendorsetup.sh"
+        fi
+
+        # 3. Полное уничтожение виновников ошибки ld.lld — перезаписываем ВСЕ мапы libbinder
+        BINDER_DIR="frameworks/native/libs/binder"
+        if [ -d "$BINDER_DIR" ]; then
+          echo "Принудительное открытие всех карт символов в $BINDER_DIR..."
+          echo "LIBBINDER { global: *; };" > "$BINDER_DIR/libbinder.map"
+          echo "LIBBINDER { global: *; };" > "$BINDER_DIR/libbinder.arm32.map"
+          echo "LIBBINDER { global: *; };" > "$BINDER_DIR/libbinder.arm64.map"
+          
+          # Убираем жесткую привязку к version_script в конфигурации Soong
+          if [ -f "$BINDER_DIR/Android.bp" ]; then
+            echo "Удаление version_script из Android.bp..."
+            sed -i '/version_script:/d' "$BINDER_DIR/Android.bp"
+          fi
+        fi
+
+        # 4. Подменяем строгий флаг '--no-undefined-version' в сборочной системе
+        echo "Патчинг конфигурационных файлов Soong и Make..."
+        find build/soong/ -type f -name "*.go" -exec sed -i 's/"-Wl,--no-undefined-version"//g' {} +
+        find build/soong/ -type f -name "*.go" -exec sed -i 's/--no-undefined-version//g' {} +
+        find build/make/core/ -type f -name "*.mk" -exec sed -i 's/-Wl,--no-undefined-version//g' {} +
         
-        echo "Linker workarounds successfully applied!"
+        echo "Все исправления успешно применены!"
         
         # === GLOBAL CLANG FLAGS TO BYPASS EXYNOS LINKER ERRORS ===
         export TARGET_CLANG_GLOBAL_LDFLAGS="-Wl,--undefined-version -Wl,--allow-shlib-undefined"
         export BOARD_GLOBAL_LDFLAGS="-Wl,--undefined-version -Wl,--allow-shlib-undefined"
         
         # === ENVIRONMENT VARIABLES FOR STABILITY ===
-        # Restrict parallel linker threads to prevent RAM exhaustion and random worker drops
         export SOONG_LINK_THREADS=1
-        # Limit build jobs to 2 threads to ensure stable compiling on GitHub runner VMs
         export NINJA_ARGS="-j2"
-        # Bypass strict dependency matching rules for legacy configurations
         export ALLOW_MISSING_DEPENDENCIES=true
         export BUILD_BROKEN_MISSING_OUTPUTS=true
         

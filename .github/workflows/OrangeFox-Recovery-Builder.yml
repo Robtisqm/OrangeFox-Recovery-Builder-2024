@@ -130,6 +130,10 @@ jobs:
         
         echo "Linker workarounds successfully applied!"
         
+        # === GLOBAL CLANG FLAGS TO BYPASS EXYNOS LINKER ERRORS ===
+        export TARGET_CLANG_GLOBAL_LDFLAGS="-Wl,--undefined-version -Wl,--allow-shlib-undefined"
+        export BOARD_GLOBAL_LDFLAGS="-Wl,--undefined-version -Wl,--allow-shlib-undefined"
+        
         # === ENVIRONMENT VARIABLES FOR STABILITY ===
         # Restrict parallel linker threads to prevent RAM exhaustion and random worker drops
         export SOONG_LINK_THREADS=1

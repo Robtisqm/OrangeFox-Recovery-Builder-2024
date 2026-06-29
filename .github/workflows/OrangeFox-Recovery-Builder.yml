@@ -114,11 +114,12 @@ jobs:
         # Android 12's Soong build system enforces symbol version matching via .map files.
         # Since we are compiling a legacy 32-bit device tree, many required mangled symbols are missing,
         # which causes ld.lld to throw fatal errors during libbinder compilation.
-        echo "Patching Soong build configuration files..."
+        echo "Patching Soong and Make build configuration files..."
         
-        # 1. Force replace '--no-undefined-version' with '--undefined-version' inside Soong core Go files
+        # 1. Force replace '--no-undefined-version' with '--undefined-version' inside Soong (Go) and Make (.mk) core files
         find build/soong/ -type f -name "*.go" -exec sed -i 's/"-Wl,--no-undefined-version"/"-Wl,--undefined-version"/g' {} +
         find build/soong/ -type f -name "*.go" -exec sed -i 's/--no-undefined-version/--undefined-version/g' {} +
+        find build/make/core/ -type f -name "*.mk" -exec sed -i 's/-Wl,--no-undefined-version/-Wl,--undefined-version/g' {} +
         
         # 2. Comment out the 'version_script' attribute in libbinder's Android.bp to bypass symbol tracking completely
         BP_PATH="frameworks/native/libs/binder/Android.bp"

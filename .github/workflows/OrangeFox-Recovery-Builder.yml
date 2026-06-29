@@ -121,11 +121,11 @@ jobs:
         find build/soong/ -type f -name "*.go" -exec sed -i 's/--no-undefined-version/--undefined-version/g' {} +
         find build/make/core/ -type f -name "*.mk" -exec sed -i 's/-Wl,--no-undefined-version/-Wl,--undefined-version/g' {} +
         
-        # 2. Comment out the 'version_script' attribute in libbinder's Android.bp to bypass symbol tracking completely
+        # 2. Force-delete the 'version_script' attribute lines in libbinder's Android.bp to bypass symbol tracking entirely
         BP_PATH="frameworks/native/libs/binder/Android.bp"
         if [ -f "$BP_PATH" ]; then
-          echo "Disabling version_script in $BP_PATH to prevent ld.lld from parsing missing 32-bit map files."
-          sed -i 's/version_script:/\/\/ version_script:/g' "$BP_PATH"
+          echo "Completely removing version_script entries from $BP_PATH to prevent ld.lld from tracking missing 32-bit symbols."
+          sed -i '/version_script:/d' "$BP_PATH"
         fi
         
         echo "Linker workarounds successfully applied!"

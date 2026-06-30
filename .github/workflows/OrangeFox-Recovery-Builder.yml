@@ -110,42 +110,42 @@ jobs:
       run: |
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
         
-        echo "=== ЗАПУСК ОВЕРРАЙД-ПАТЧЕЙ ДЛЯ EXYNOS 4412 ==="
+        echo "=== RUNNING OVERRIDE PATCHES FOR EXYNOS 4412 ==="
         
-        # 1. Вырезаем устаревшие флаги TARGET_GLOBAL_LDFLAGS прямо из дерева устройств во время сборки
+        # 1. Strip deprecated TARGET_GLOBAL_LDFLAGS flags directly from device tree during build
         if [ -f "${{ github.event.inputs.DEVICE_PATH }}/BoardConfig.mk" ]; then
-          echo "Зачистка BoardConfig.mk от TARGET_GLOBAL_LDFLAGS..."
+          echo "Cleaning BoardConfig.mk from TARGET_GLOBAL_LDFLAGS..."
           sed -i '/TARGET_GLOBAL_LDFLAGS/d' "${{ github.event.inputs.DEVICE_PATH }}/BoardConfig.mk"
         fi
 
-        # 2. Очищаем устаревшие вызовы в файлеvendorsetup.sh
+        # 2. Clear deprecated calls in vendorsetup.sh
         if [ -f "${{ github.event.inputs.DEVICE_PATH }}/vendorsetup.sh" ]; then
-          echo "Зачистка vendorsetup.sh..."
+          echo "Cleaning vendorsetup.sh..."
           sed -i '/TARGET_GLOBAL_LDFLAGS/d' "${{ github.event.inputs.DEVICE_PATH }}/vendorsetup.sh"
         fi
 
-        # 3. Полное уничтожение виновников ошибки ld.lld — перезаписываем ВСЕ мапы libbinder
+        # 3. Complete annihilation of ld.lld error culprits — overwrite ALL libbinder maps
         BINDER_DIR="frameworks/native/libs/binder"
         if [ -d "$BINDER_DIR" ]; then
-          echo "Принудительное открытие всех карт символов в $BINDER_DIR..."
+          echo "Forcing open all symbol maps in $BINDER_DIR..."
           echo "LIBBINDER { global: *; };" > "$BINDER_DIR/libbinder.map"
           echo "LIBBINDER { global: *; };" > "$BINDER_DIR/libbinder.arm32.map"
           echo "LIBBINDER { global: *; };" > "$BINDER_DIR/libbinder.arm64.map"
           
-          # Убираем жесткую привязку к version_script в конфигурации Soong
+          # Remove strict binding to version_script in Soong configuration
           if [ -f "$BINDER_DIR/Android.bp" ]; then
-            echo "Удаление version_script из Android.bp..."
+            echo "Removing version_script from Android.bp..."
             sed -i '/version_script:/d' "$BINDER_DIR/Android.bp"
           fi
         fi
 
-        # 4. Подменяем строгий флаг '--no-undefined-version' в сборочной системе
-        echo "Патчинг конфигурационных файлов Soong и Make..."
+        # 4. Replace strict '--no-undefined-version' flag in the build system
+        echo "Patching Soong and Make configuration files..."
         find build/soong/ -type f -name "*.go" -exec sed -i 's/"-Wl,--no-undefined-version"//g' {} +
         find build/soong/ -type f -name "*.go" -exec sed -i 's/--no-undefined-version//g' {} +
         find build/make/core/ -type f -name "*.mk" -exec sed -i 's/-Wl,--no-undefined-version//g' {} +
         
-        echo "Все исправления успешно применены!"
+        echo "All fixes applied successfully!"
         
         # === GLOBAL CLANG FLAGS TO BYPASS EXYNOS LINKER ERRORS ===
         export TARGET_CLANG_GLOBAL_LDFLAGS="-Wl,--undefined-version -Wl,--allow-shlib-undefined"

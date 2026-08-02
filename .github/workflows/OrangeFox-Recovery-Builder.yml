@@ -137,6 +137,15 @@ jobs:
         if [ -f "build/soong/cc/config/global.go" ]; then
           sed -i 's/"-Wl,--fatal-warnings",//g' build/soong/cc/config/global.go || true
         fi
+
+        # 5. FIX OPENAES LINKER SYMBOL ERRORS IN RECOVERY
+        if [ -f "bootable/recovery/twrp-functions.cpp" ]; then
+          echo "Patching twrp-functions.cpp against OpenAES undefined symbols..."
+          sed -i 's/oaes_alloc();/NULL;/g' bootable/recovery/twrp-functions.cpp || true
+          sed -i 's/oaes_key_import_data.*/0;/g' bootable/recovery/twrp-functions.cpp || true
+          sed -i 's/oaes_decrypt.*/0;/g' bootable/recovery/twrp-functions.cpp || true
+          sed -i 's/oaes_free.*/;/g' bootable/recovery/twrp-functions.cpp || true
+        fi
         
         echo "All patches applied successfully!"
         

@@ -138,13 +138,20 @@ jobs:
           sed -i 's/"-Wl,--fatal-warnings",//g' build/soong/cc/config/global.go || true
         fi
 
-        # 5. FIX OPENAES LINKER SYMBOL ERRORS IN RECOVERY
+        # 5. Fix OpenAES linker symbol errors
         if [ -f "bootable/recovery/twrp-functions.cpp" ]; then
           echo "Patching twrp-functions.cpp against OpenAES undefined symbols..."
           sed -i 's/oaes_alloc();/NULL;/g' bootable/recovery/twrp-functions.cpp || true
           sed -i 's/oaes_key_import_data.*/0;/g' bootable/recovery/twrp-functions.cpp || true
           sed -i 's/oaes_decrypt.*/0;/g' bootable/recovery/twrp-functions.cpp || true
           sed -i 's/oaes_free.*/;/g' bootable/recovery/twrp-functions.cpp || true
+        fi
+
+        # 6. Fix undeclared AID_MEDIA_RW in partitionmanager.cpp
+        if [ -f "bootable/recovery/partitionmanager.cpp" ]; then
+          echo "Patching AID_MEDIA_RW in partitionmanager.cpp..."
+          sed -i '1s/^/#include <cutils\/android_filesystem_config.h>\n/' bootable/recovery/partitionmanager.cpp || true
+          sed -i 's/AID_MEDIA_RW/1023/g' bootable/recovery/partitionmanager.cpp || true
         fi
         
         echo "All patches applied successfully!"

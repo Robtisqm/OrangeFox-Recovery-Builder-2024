@@ -112,57 +112,47 @@ jobs:
         
         echo "=== RUNNING OVERRIDE PATCHES FOR EXYNOS 4412 ==="
         
-        # 1. Strip deprecated TARGET_GLOBAL_LDFLAGS flags directly from device tree during build
+        # 1. Clean device tree config files
         if [ -f "${{ github.event.inputs.DEVICE_PATH }}/BoardConfig.mk" ]; then
-          echo "Cleaning BoardConfig.mk from TARGET_GLOBAL_LDFLAGS..."
           sed -i '/TARGET_GLOBAL_LDFLAGS/d' "${{ github.event.inputs.DEVICE_PATH }}/BoardConfig.mk"
         fi
-
-        # 2. Clear deprecated calls in vendorsetup.sh
         if [ -f "${{ github.event.inputs.DEVICE_PATH }}/vendorsetup.sh" ]; then
-          echo "Cleaning vendorsetup.sh..."
           sed -i '/TARGET_GLOBAL_LDFLAGS/d' "${{ github.event.inputs.DEVICE_PATH }}/vendorsetup.sh"
         fi
 
-        # 3. Complete annihilation of ld.lld error culprits — overwrite ALL libbinder maps
+        # 2. Aggressively purge version scripts and maps from libbinder
         BINDER_DIR="frameworks/native/libs/binder"
         if [ -d "$BINDER_DIR" ]; then
-          echo "Forcing open all symbol maps in $BINDER_DIR..."
-          echo "LIBBINDER { global: *; };" > "$BINDER_DIR/libbinder.map"
-          echo "LIBBINDER { global: *; };" > "$BINDER_DIR/libbinder.arm32.map"
-          echo "LIBBINDER { global: *; };" > "$BINDER_DIR/libbinder.arm64.map"
-          
-          # Remove strict binding to version_script in Soong configuration
-          if [ -f "$BINDER_DIR/Android.bp" ]; then
-            echo "Removing version_script from Android.bp..."
-            sed -i '/version_script:/d' "$BINDER_DIR/Android.bp"
-          fi
+          echo "Purging version script maps in $BINDER_DIR..."
+          rm -f "$BINDER_DIR"/*.map
+          sed -i '/version_script/d' "$BINDER_DIR/Android.bp"
         fi
 
-        # 4. Replace strict '--no-undefined-version' flag in the build system
-        echo "Patching Soong and Make configuration files..."
-        find build/soong/ -type f -name "*.go" -exec sed -i 's/"-Wl,--no-undefined-version"//g' {} +
-        find build/soong/ -type f -name "*.go" -exec sed -i 's/--no-undefined-version//g' {} +
-        find build/make/core/ -type f -name "*.mk" -exec sed -i 's/-Wl,--no-undefined-version//g' {} +
+        # 3. Force Soong linker to pass --undefined-version globally
+        echo "Patching Soong Go sources to inject --undefined-version..."
+        find build/soong/ -type f -name "*.go" -exec sed -i 's/"-Wl,--no-undefined-version"/"-Wl,--undefined-version"/g' {} +
+        find build/soong/ -type f -name "*.go" -exec sed -i 's/--no-undefined-version/--undefined-version/g' {} +
+        find build/make/core/ -type f -name "*.mk" -exec sed -i 's/-Wl,--no-undefined-version/-Wl,--undefined-version/g' {} +
+
+        # 4. Inject global linker flags into build/soong/cc/config/global.go
+        if [ -f "build/soong/cc/config/global.go" ]; then
+          sed -i 's/"-Wl,--fatal-warnings",//g' build/soong/cc/config/global.go || true
+        fi
         
-        echo "All fixes applied successfully!"
+        echo "All patches applied successfully!"
         
-        # === GLOBAL CLANG FLAGS TO BYPASS EXYNOS LINKER ERRORS ===
-        export TARGET_CLANG_GLOBAL_LDFLAGS="-Wl,--undefined-version -Wl,--allow-shlib-undefined"
-        export BOARD_GLOBAL_LDFLAGS="-Wl,--undefined-version -Wl,--allow-shlib-undefined"
-        
-        # === ENVIRONMENT VARIABLES FOR STABILITY ===
+        # === ENVIRONMENT VARIABLES ===
         export SOONG_LINK_THREADS=1
         export NINJA_ARGS="-j2"
         export ALLOW_MISSING_DEPENDENCIES=true
         export BUILD_BROKEN_MISSING_OUTPUTS=true
         
-        # Initialize the Android build environment
+        # Initialize Android build environment
         set +e
         source build/envsetup.sh
         set -e
         
-        # Determine the target compilation profile dynamically and execute the target build engine
+        # Determine lunch target and start compilation
         if lunch omni_${{ github.event.inputs.DEVICE_NAME }}-eng; then
             echo "Profile OMNI found. Starting compilation..."
             make clean
@@ -176,7 +166,7 @@ jobs:
             exit 1
         fi
 
-    # Step 8: Calculate and register structural parameters and dates for automated release names
+    # Step 8: Calculate parameters and dates for automated release names
     - name: Set Build Date
       run: |
         echo "BUILD_DATE=$(date +%Y%m%d)" >> $GITHUB_ENV
@@ -186,7 +176,7 @@ jobs:
         fi
         echo "DEVICE_TREE_URL=${DEVICE_TREE_URL}" >> $GITHUB_ENV
 
-    # Step 9: Verify compilation integrity by checking if output binaries exist inside the build target folder
+    # Step 9: Verify compilation integrity
     - name: Check if Recovery Exist
       run: |
         cd "$GITHUB_WORKSPACE/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}"
@@ -201,7 +191,7 @@ jobs:
             exit 1
         fi
 
-    # Step 10: Standardize output filename to ensure compatibility across flashing tools
+    # Step 10: Standardize output filename
     - name: Rename the Recovery
       if: ${{ env.CHECK_IMG_IS_OK == 'true' }}
       run: |
@@ -211,14 +201,14 @@ jobs:
         fi
         echo "RECOVERY_TYPE=recovery" >> $GITHUB_ENV
 
-    # Step 11: Pack the compiled binary image into a .tar archive for compatibility with Samsung Odin tool
+    # Step 11: Pack binary into .tar archive for Samsung Odin
     - name: Recovery to tar for Samsung
       if: ${{ env.CHECK_IMG_IS_OK == 'true' && (github.event.inputs.RECOVERY_TAR == 'true' || github.event.inputs.RECOVERY_TAR == true) }}
       run: |
         cd "$FILE_PATH"
         tar -cvf recovery.tar recovery.img
 
-    # Step 12: Upload binaries (.img and .tar) directly to GitHub Repository Releases page
+    # Step 12: Upload binaries to GitHub Releases
     - name: Upload to Release
       if: ${{ env.CHECK_IMG_IS_OK == 'true' }}
       uses: softprops/action-gh-release@v1

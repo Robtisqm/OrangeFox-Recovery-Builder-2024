@@ -6,12 +6,11 @@ on:
       MANIFEST_BRANCH:
         description: 'OrangeFox Branch'
         required: true
-        default: '11.0'
+        default: '12.1'
         type: choice
         options:
-        - 14.1
         - 12.1
-        - 11.0
+        - 14.1
       DEVICE_TREE:
         description: 'Custom Recovery Tree'
         required: true
@@ -100,9 +99,7 @@ jobs:
     # Step 6: Clone your custom device tree into the correct subdirectory inside the build environment
     - name: Clone Device Tree
       run: |
-        FOX_DIR=$(find ${GITHUB_WORKSPACE}/OrangeFox/ -maxdepth 1 -type d -name "fox_*" | head -n 1)
-        echo "Found OrangeFox directory: $FOX_DIR"
-        cd $FOX_DIR
+        cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
         git clone ${{ github.event.inputs.DEVICE_TREE }} -b ${{ github.event.inputs.DEVICE_TREE_BRANCH }} ./${{ github.event.inputs.DEVICE_PATH }}
         cd ./${{ github.event.inputs.DEVICE_PATH }}
         echo "COMMIT_ID=$(git rev-parse HEAD)" >> $GITHUB_ENV
@@ -110,8 +107,7 @@ jobs:
     # Step 7: Apply linker hacks and compile the recovery image
     - name: Building OrangeFox
       run: |
-        FOX_DIR=$(find ${GITHUB_WORKSPACE}/OrangeFox/ -maxdepth 1 -type d -name "fox_*" | head -n 1)
-        cd $FOX_DIR
+        cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
         
         echo "=== RUNNING OVERRIDE PATCHES FOR EXYNOS 4412 ==="
         
@@ -182,14 +178,13 @@ jobs:
     # Step 9: Verify compilation integrity
     - name: Check if Recovery Exist
       run: |
-        FOX_DIR=$(find ${GITHUB_WORKSPACE}/OrangeFox/ -maxdepth 1 -type d -name "fox_*" | head -n 1)
-        cd "$FOX_DIR"
+        cd "$GITHUB_WORKSPACE/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}"
         if ls out/target/product/${{ github.event.inputs.DEVICE_NAME }}/OrangeFox*.img >/dev/null 2>&1; then
             echo "CHECK_IMG_IS_OK=true" >> $GITHUB_ENV
-            echo "FILE_PATH=$FOX_DIR/out/target/product/${{ github.event.inputs.DEVICE_NAME }}" >> $GITHUB_ENV
+            echo "FILE_PATH=$GITHUB_WORKSPACE/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}/out/target/product/${{ github.event.inputs.DEVICE_NAME }}" >> $GITHUB_ENV
         elif ls out/target/product/${{ github.event.inputs.DEVICE_NAME }}/recovery.img >/dev/null 2>&1; then
             echo "CHECK_IMG_IS_OK=true" >> $GITHUB_ENV
-            echo "FILE_PATH=$FOX_DIR/out/target/product/${{ github.event.inputs.DEVICE_NAME }}" >> $GITHUB_ENV
+            echo "FILE_PATH=$GITHUB_WORKSPACE/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}/out/target/product/${{ github.event.inputs.DEVICE_NAME }}" >> $GITHUB_ENV
         else
             echo "Critical Error: Compiled binary image not found inside build out directory!"
             exit 1
